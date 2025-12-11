@@ -1,0 +1,218 @@
+CREATE DATABASE pizza_shop;
+GO
+USE pizza_shop;
+GO
+
+-- Customers table
+CREATE TABLE customers (
+    customer_id INT PRIMARY KEY,
+    customer_first_name VARCHAR(50) NOT NULL,
+    customer_last_name VARCHAR(50) NOT NULL
+);
+
+-- Address table
+CREATE TABLE address (
+    address_id INT PRIMARY KEY,
+    delivery_address1 VARCHAR(200) NOT NULL,
+    delivery_address2 VARCHAR(200) NULL,
+    delivery_city VARCHAR(50) NOT NULL,
+    delivery_zipcode VARCHAR(20) NOT NULL
+);
+
+-- Items table
+CREATE TABLE items (
+    item_id VARCHAR(15) PRIMARY KEY,
+    item_sku VARCHAR(50) NOT NULL UNIQUE,
+    item_name VARCHAR(50) NOT NULL,
+    item_category VARCHAR(50) NOT NULL,
+    item_size VARCHAR(20) NOT NULL,
+    item_price DECIMAL(5,2) NOT NULL
+);
+
+-- Ingredients table
+CREATE TABLE ingredients (
+    ing_id VARCHAR(20) PRIMARY KEY,
+    ing_name VARCHAR(50) NOT NULL,
+    ing_weight INT NOT NULL,
+    ing_measurements VARCHAR(20) NOT NULL,
+    ing_price DECIMAL(5,2) NOT NULL
+);
+
+-- Staff table
+CREATE TABLE staff (
+    staff_id VARCHAR(10) PRIMARY KEY,
+    first_name VARCHAR(30) NOT NULL,
+    last_name VARCHAR(30) NOT NULL,
+    position VARCHAR(20) NOT NULL,
+    hourly_rate DECIMAL(6,2) NOT NULL
+);
+
+-- Shifts table
+CREATE TABLE shifts (
+    shift_id VARCHAR(10) PRIMARY KEY,
+    day_of_the_week VARCHAR(10) NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL
+);
+
+-- Orders table
+CREATE TABLE orders (
+    row_id INT PRIMARY KEY,
+    order_id VARCHAR(10) NOT NULL,
+    cust_id INT NOT NULL,
+    created_date DATE NOT NULL,
+    created_at TIME NOT NULL,
+    item_id VARCHAR(15) NOT NULL,
+    quantity INT NOT NULL,
+    delivery BIT NOT NULL,
+    add_id INT NOT NULL
+);
+
+-- Recipe table
+CREATE TABLE recipe (
+    row_id INT PRIMARY KEY,
+    recipe_id VARCHAR(50) NOT NULL,
+    ing_id VARCHAR(20) NOT NULL,
+    quantity DECIMAL(5,2) NOT NULL
+);
+
+-- Inventory table
+CREATE TABLE inventory (
+    inv_id INT PRIMARY KEY,
+    item_id VARCHAR(20) NOT NULL,
+    quantity INT NOT NULL
+);
+
+-- Rotations table
+CREATE TABLE rotations (
+    row_id INT PRIMARY KEY,
+    rota_id VARCHAR(10) NOT NULL,
+    date DATE NOT NULL,
+    shift_id VARCHAR(10) NOT NULL,
+    staff_id VARCHAR(10) NOT NULL
+);
+
+CREATE VIEW v_order_details AS
+SELECT 
+    o.row_id,
+    o.order_id,
+    o.created_date,
+    o.created_at,
+    DATEPART(HOUR, o.created_at) AS order_hour,
+    DATENAME(WEEKDAY, o.created_date) AS day_name,
+    c.customer_id,
+    c.customer_first_name,
+    c.customer_last_name,
+    a.delivery_address1,
+    a.delivery_city,
+    a.delivery_zipcode,
+    i.item_id,
+    i.item_sku,
+    i.item_name,
+    i.item_category,
+    i.item_size,
+    i.item_price,
+    o.quantity,
+    (i.item_price * o.quantity) AS line_total,
+    CASE WHEN o.delivery = 1 THEN 'Delivery' ELSE 'Pickup' END AS order_type
+FROM orders o
+JOIN customers c ON o.cust_id = c.customer_id
+JOIN address a ON o.add_id = a.address_id
+JOIN items i ON o.item_id = i.item_id;
+
+CREATE VIEW v_daily_sales AS
+SELECT 
+    created_date,
+    COUNT(DISTINCT order_id) AS orders,
+    SUM(i.item_price * o.quantity) AS revenue
+FROM orders o
+JOIN items i ON o.item_id = i.item_id
+GROUP BY created_date;
+
+CREATE VIEW v_hourly_sales AS
+SELECT 
+    DATEPART(HOUR, created_at) AS hour_of_day,
+    COUNT(DISTINCT order_id) AS orders,
+    SUM(i.item_price * o.quantity) AS revenue
+FROM orders o
+JOIN items i ON o.item_id = i.item_id
+GROUP BY DATEPART(HOUR, created_at);
+
+CREATE VIEW v_item_sales AS
+SELECT 
+    i.item_id,
+    i.item_name,
+    i.item_category,
+    i.item_size,
+    i.item_price,
+    SUM(o.quantity) AS qty_sold,
+    SUM(i.item_price * o.quantity) AS revenue
+FROM orders o
+JOIN items i ON o.item_id = i.item_id
+GROUP BY i.item_id, i.item_name, i.item_category, i.item_size, i.item_price;
+
+CREATE VIEW v_category_sales AS
+SELECT 
+    i.item_category,
+    SUM(o.quantity) AS qty_sold,
+    SUM(i.item_price * o.quantity) AS revenue,
+    COUNT(DISTINCT o.order_id) AS orders
+FROM orders o
+JOIN items i ON o.item_id = i.item_id
+GROUP BY i.item_category;
+
+CREATE VIEW v_staff_shifts AS
+SELECT 
+    r.date,
+    r.rota_id,
+    s.staff_id,
+    s.first_name,
+    s.last_name,
+    s.position,
+    s.hourly_rate,
+    sh.day_of_the_week,
+    sh.start_time,
+    sh.end_time,
+    (DATEDIFF(MINUTE, '00:00:00', sh.end_time) - DATEDIFF(MINUTE, '00:00:00', sh.start_time)) / 60.0 AS hours_worked,
+    ((DATEDIFF(MINUTE, '00:00:00', sh.end_time) - DATEDIFF(MINUTE, '00:00:00', sh.start_time)) / 60.0) * s.hourly_rate AS shift_cost
+FROM rotations r
+JOIN staff s ON r.staff_id = s.staff_id
+JOIN shifts sh ON r.shift_id = sh.shift_id;
+
+-- SOME SAMPLE QUERIES
+-- Total Revenue and Orders
+SELECT 
+    COUNT(DISTINCT order_id) AS total_orders,
+    SUM(line_total) AS total_revenue,
+    SUM(line_total) / COUNT(DISTINCT order_id) AS avg_order_value
+FROM v_order_details;
+
+-- Top 10 Selling Items
+SELECT TOP 10
+    item_name,
+    qty_sold,
+    revenue
+FROM v_item_sales
+ORDER BY revenue DESC;
+
+-- Peak Hours
+SELECT 
+    hour_of_day,
+    orders,
+    revenue
+FROM v_hourly_sales
+ORDER BY orders DESC;
+
+-- Delivery vs Pickup
+SELECT 
+    order_type,
+    COUNT(DISTINCT order_id) AS orders,
+    SUM(line_total) AS revenue
+FROM v_order_details
+GROUP BY order_type;
+
+--Total Labour Cost
+SELECT 
+    SUM(shift_cost) AS total_labour_cost,
+    SUM(hours_worked) AS total_hours
+FROM v_staff_shifts;
